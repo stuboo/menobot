@@ -8,7 +8,6 @@ from datetime import datetime
 # Initialize OpenAI client and credentials
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
 ASSISTANT_ID_CHAT = st.secrets["ASSISTANT_ID_CHAT"]
-ASSISTANT_ID_EVAL = st.secrets["ASSISTANT_ID_EVAL"]
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 # Initialize session state to store conversation history
@@ -17,47 +16,57 @@ if "chat_history" not in st.session_state:
 if "thread_id" not in st.session_state:
     st.session_state.thread_id = None
 
-# Your PHP API URL for logging
-PHP_API_URL = "https://tools.ryanstewart.com/log.php"
-
-
-# Function to send logs to the PHP API
-def send_log_to_php_api(conversation, evaluation):
-    payload = {
-        "conversation": conversation,
-        "evaluation": evaluation
-    }
-
-    try:
-        response = requests.post(PHP_API_URL, json=payload)
-        if response.status_code == 200:
-            data = response.json()
-            if data["status"] == "success":
-                st.success("Conversation and evaluation logged successfully.")
-            else:
-                st.error(f"Failed to log: {data['message']}")
-        else:
-            st.error(f"Error: {response.status_code}")
-    except Exception as e:
-        st.error(f"An error occurred: {e}")
-
-
 # Set the app layout to wide
 st.set_page_config(layout="wide")
 
+# Custom CSS to fix the input box at the bottom
+st.markdown(
+    """
+    <style>
+    .main {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+    }
+    .chat-container {
+        flex: 1;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column-reverse;
+    }
+    .input-box {
+        position: fixed;
+        bottom: 0;
+        width: 100%;
+        background: white;
+        padding: 10px;
+        z-index: 1000;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 # Define app tabs
-tab1, tab2 = st.tabs(["Examine", "Evaluate"])
+tab1 = st.tabs(["Examine"])[0]
 
 # Examine tab - Chat with assistant
 with tab1:
     st.header("Chat with Assistant")
 
+    # Create a container for chat messages
+    chat_container = st.container()
+
     # Display messages in chat history
-    for message in st.session_state.chat_history:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    with chat_container:
+        st.markdown('<div class="chat-container">', unsafe_allow_html=True)
+        for message in st.session_state.chat_history:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+        st.markdown('</div>', unsafe_allow_html=True)
 
     # Textbox and streaming process for chat input
+    st.markdown('<div class="input-box">', unsafe_allow_html=True)
     if user_query := st.chat_input("Ask me a question"):
         # Create a new thread if it does not exist
         if not st.session_state.thread_id:
@@ -101,45 +110,4 @@ with tab1:
 
             # Once the stream is over, update chat history
             st.session_state.chat_history.append({"role": "assistant", "content": assistant_reply})
-
-# Evaluate tab - Log of the conversation and evaluation button
-with tab2:
-    st.header("Evaluate Conversation Log")
-
-    # Display the conversation log
-    conversation_log = "\n".join([f"{m['role'].capitalize()}: {m['content']}" for m in st.session_state.chat_history])
-    st.text_area("Conversation Log", conversation_log, height=300, disabled=True)
-
-    # Button to evaluate conversation log
-    if st.button("EVALUATE RESPONSES"):
-        if st.session_state.chat_history:
-            # Prepare the conversation history as a single block of text
-            log_text = "\n".join([f"{m['role'].capitalize()}: {m['content']}" for m in st.session_state.chat_history])
-
-            # Run the evaluation using the second assistant
-            eval_run = client.beta.threads.runs.create(
-                thread_id=st.session_state.thread_id,  # Reuse the thread
-                assistant_id=ASSISTANT_ID_EVAL,
-                stream=True  # Keep streaming mode to capture response
-            )
-
-            # Collect the evaluation result
-            eval_response = ""
-            eval_reply_box = st.empty()
-
-            for event in eval_run:
-                if isinstance(event, ThreadMessageDelta):
-                    if event.data.delta.content and isinstance(event.data.delta.content[0], TextDeltaBlock):
-                        eval_response += event.data.delta.content[0].text.value
-                        eval_reply_box.markdown(eval_response)
-
-            # Check if any response was collected
-            if not eval_response.strip():
-                st.error("No evaluation response received.")
-            else:
-                # Send the conversation and evaluation to the PHP API
-                send_log_to_php_api(conversation_log, eval_response)
-
-                # Show the evaluation response in a modal window (Streamlit popover)
-                st.success("Evaluation Result:")
-                st.markdown(f"<div class='popover'><p>{eval_response}</p></div>", unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
