@@ -47,67 +47,62 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Define app tabs
-tab1 = st.tabs(["Examine"])[0]
+st.title("Chat with Assistant")
 
-# Examine tab - Chat with assistant
-with tab1:
-    st.header("Chat with Assistant")
+# Create a container for chat messages
+chat_container = st.container()
 
-    # Create a container for chat messages
-    chat_container = st.container()
+# Display messages in chat history
+with chat_container:
+    st.markdown('<div class="chat-container">', unsafe_allow_html=True)
+    for message in st.session_state.chat_history:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    # Display messages in chat history
-    with chat_container:
-        st.markdown('<div class="chat-container">', unsafe_allow_html=True)
-        for message in st.session_state.chat_history:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
-        st.markdown('</div>', unsafe_allow_html=True)
+# Textbox and streaming process for chat input
+st.markdown('<div class="input-box">', unsafe_allow_html=True)
+if user_query := st.chat_input("Ask me a question"):
+    # Create a new thread if it does not exist
+    if not st.session_state.thread_id:
+        thread = client.beta.threads.create()
+        st.session_state.thread_id = thread.id
 
-    # Textbox and streaming process for chat input
-    st.markdown('<div class="input-box">', unsafe_allow_html=True)
-    if user_query := st.chat_input("Ask me a question"):
-        # Create a new thread if it does not exist
-        if not st.session_state.thread_id:
-            thread = client.beta.threads.create()
-            st.session_state.thread_id = thread.id
+    # Display the user's query
+    with st.chat_message("user"):
+        st.markdown(user_query)
 
-        # Display the user's query
-        with st.chat_message("user"):
-            st.markdown(user_query)
+    # Store the user's query into the history
+    st.session_state.chat_history.append({"role": "user", "content": user_query})
 
-        # Store the user's query into the history
-        st.session_state.chat_history.append({"role": "user", "content": user_query})
+    # Add user query to the thread
+    client.beta.threads.messages.create(
+        thread_id=st.session_state.thread_id,
+        role="user",
+        content=user_query
+    )
 
-        # Add user query to the thread
-        client.beta.threads.messages.create(
+    # Stream the assistant's reply
+    with st.chat_message("assistant"):
+        stream = client.beta.threads.runs.create(
             thread_id=st.session_state.thread_id,
-            role="user",
-            content=user_query
+            assistant_id=ASSISTANT_ID_CHAT,
+            stream=True
         )
 
-        # Stream the assistant's reply
-        with st.chat_message("assistant"):
-            stream = client.beta.threads.runs.create(
-                thread_id=st.session_state.thread_id,
-                assistant_id=ASSISTANT_ID_CHAT,
-                stream=True
-            )
+        # Empty container to display the assistant's reply
+        assistant_reply_box = st.empty()
 
-            # Empty container to display the assistant's reply
-            assistant_reply_box = st.empty()
+        # A blank string to store the assistant's reply
+        assistant_reply = ""
 
-            # A blank string to store the assistant's reply
-            assistant_reply = ""
+        # Iterate through the stream and update assistant's reply
+        for event in stream:
+            if isinstance(event, ThreadMessageDelta):
+                if event.data.delta.content and isinstance(event.data.delta.content[0], TextDeltaBlock):
+                    assistant_reply += event.data.delta.content[0].text.value
+                    assistant_reply_box.markdown(assistant_reply)
 
-            # Iterate through the stream and update assistant's reply
-            for event in stream:
-                if isinstance(event, ThreadMessageDelta):
-                    if event.data.delta.content and isinstance(event.data.delta.content[0], TextDeltaBlock):
-                        assistant_reply += event.data.delta.content[0].text.value
-                        assistant_reply_box.markdown(assistant_reply)
-
-            # Once the stream is over, update chat history
-            st.session_state.chat_history.append({"role": "assistant", "content": assistant_reply})
-    st.markdown('</div>', unsafe_allow_html=True)
+        # Once the stream is over, update chat history
+        st.session_state.chat_history.append({"role": "assistant", "content": assistant_reply})
+st.markdown('</div>', unsafe_allow_html=True)
